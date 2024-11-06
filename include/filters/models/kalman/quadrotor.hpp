@@ -9,9 +9,9 @@
 #define TYPE double
 #define N_STATES 16
 #define N_CONTROLS 6
-#define N_MEASUREMENTS 10
+#define N_MEASUREMENTS 7
 #define N_PROCESS_NOISES 12
-#define N_MEASUREMENT_NOISES 10
+#define N_MEASUREMENT_NOISES 7
 #define N_HISTORY 200
 
 
@@ -241,88 +241,16 @@ class UKFQuad
 
       Eigen::Matrix<TYPE, N_MEASUREMENTS, 1> z; //!< The predicted measurement
       
-      _quat_current.w() = x(6);
-      _quat_current.x() = x(7);
-      _quat_current.y() = x(8);
-      _quat_current.z() = x(9);
-      
-      switch(_measurement_source)
-      {
-
-        case 0:
-          /**
-           * The state x consists of 15 elements (x, y, z, vx, vy, vz, qw, qx, qy, qz,
-           * ax_bias, ay_bias, az_bias, wx_bias, wy_bias, wz_bias) and 9 noise elements
-           * (position_noise, velocity_noise, orientation_noise) each as a 3x1 vector
-           * The measurement z consists of 9 elements the position (x, y, z) and velocities (vx, vy, vz)
-           * and orientation (phi, theta, psi).
-           */
-          z(0) = x(0) - x(16);                        //!< measured x position = x - x_noise
-          z(1) = x(1) - x(17);                        //!< measured y position = y - y_noise
-          z(2) = x(2) - x(18) + _gps_altitude_offset; //!< measured z position = z - z_noise + gps_altitude_offset
-
-          /**
-           * The velocity on the other hand will be measured in the sensors frame and we need to use the adjoint
-           * of the rotation matrix to transform it to the world frame
-           */
-          
-          /**
-           * The velocity from mavros is in the body frame. We need to transform it to the world frame, we use 
-           * the rotation matrix to get the world frame. But since we need to predict the measurement, we need to
-           * use the inverse of the rotation from body to world. Since the rotation matrix is a special orthogonal
-           * SO3 its inverse is the transpose of the matrix
-           *
-           * 
-           */
-          z.block<3, 1>(3, 0) = _quat_current.inverse() * (x.block<3, 1>(3, 0) + x.block<3, 1>(19, 0)); //!< measurement = Rot.transpose * (velocity + velocity_noise)
-
-          break;
-        case 1:
-          /**
-           * The measurement of Z is in pressure and we need to convert the pressure to altitude to get the state. In the 
-           * measurement model we need to estimate the pressure read at that alitude so we take the inverse of the barometric 
-           * function as seen below
-          // h - h0 = (1 - (p / p0)^(1/5.257)) * 44330
-          // (h - h0)/44330 = 1 - (p / p0)^(1/5.257)
-          */
-          z(0) = x(0) - x(16);
-          z(1) = x(1) - x(17);
-          z(2) = _baro_initial_pressure * (std::pow(1 - ((x(2) - _baro_initial_altitude - x(18))/ 44330),5.257));
-          z.block<3, 1>(3, 0) = x.block<3, 1>(3, 0) - x.block<3, 1>(19, 0);
-          break;
-        case 2:
-          /**
-           * The measurement of the altitude from the drone is done in the body frame, and we need to convert it to the 
-           * world frame using the rotation matrix inverse. Since we only care about the world Z we can just multiply
-           * the element (2, 2) of the rotation matrix inverse by the altitude measured by the laser
-           * The quaternion converted to a rotation matrix and its (2, 2) element is 
-           * R(2, 2) =  2 * (qy^2 + qz^2) - 1.0
-           */
-          z(0) = x(0) - x(16);
-          z(1) = x(1) - x(17);
-          z(2) =  ((x(2) - x(18)) / ((2.0 * (_quat_current.w()*_quat_current.w() + _quat_current.z()*_quat_current.z())) - 1.0)); //!< Alt = Hgt / cos(pitch) * cos(roll)
-          /* z(2) = _quat_current.w() >= 0.0 ? z(2) : -z(2); */
-          z.block<3, 1>(3, 0) = x.block<3, 1>(3, 0) + x.block<3, 1>(19, 0);
-          break;
-        case 3: 
-          /**
-           * The measurement of the GPS comes in the ECEF frame and we need to convert it to the local frame to be useful, we use the WGS84 convention to do the convertion
-           * We use the WGS84 library that is available in this package to do the conversion. The home point is taken from the mavros topic and we use the convention of the local frame
-           * to convert the ECEF to the local frame
-           */
-          std::array<TYPE, 2> pose;
-          pose[0] = x(0) - x(16);
-          pose[1] = x(1) - x(17);
-          std::array<TYPE, 2> wgs84;
-          wgs84 = wgs84::fromCartesian(_gps_wgs84_home, pose);
-          z(0) = wgs84[0];
-          z(1) = wgs84[1];
-          z(2) = -x(2) - x(18) - _gps_altitude_offset;
-          z.block<3, 1>(3, 0) = x.block<3, 1>(3, 0) + x.block<3, 1>(19, 0);
-          break;
-        default:
-          break;
-      }
+      /**
+       * The state x consists of 15 elements (x, y, z, vx, vy, vz, qw, qx, qy, qz,
+       * ax_bias, ay_bias, az_bias, wx_bias, wy_bias, wz_bias) and 9 noise elements
+       * (position_noise, velocity_noise, orientation_noise) each as a 3x1 vector
+       * The measurement z consists of 9 elements the position (x, y, z) and velocities (vx, vy, vz)
+       * and orientation (phi, theta, psi).
+       */
+      z(0) = x(0) - x(16); //!< measured x position = x - x_noise
+      z(1) = x(1) - x(17); //!< measured y position = y - y_noise
+      z(2) = x(2) - x(18); //!< measured z position = z - z_noise
 
       /**
        * The orientation is a direct linear function of the state
@@ -349,27 +277,6 @@ class UKFQuad
     void gravity(TYPE gravity){ _gravity = gravity; }
     TYPE gravity() const { return _gravity; }
 
-    void measurementSource(int measurement_source){ _measurement_source = measurement_source; }
-    int measurementSource() const { return _measurement_source; }
-
-    void baroInitialPressure(TYPE baro_initial_pressure){ _baro_initial_pressure = baro_initial_pressure; }
-    TYPE baroInitialPressure() const { return _baro_initial_pressure; }
-
-    void baroInitialAltitude(TYPE baro_initial_altitude){ _baro_initial_altitude = baro_initial_altitude; }
-    TYPE baroInitialAltitude() const { return _baro_initial_altitude; }
-
-    void baroTemperature(TYPE baro_temperature){ _baro_temperature = baro_temperature; }
-    TYPE baroTemperature() const { return _baro_temperature; }
-
-    void rangeInitialAltitude(TYPE range_initial_altitude){ _range_initial_altitude = range_initial_altitude; }
-    TYPE rangeInitialAltitude() const { return _range_initial_altitude; }
-
-    void gpsAltitudeOffset(TYPE gps_altitude_offset){ _gps_altitude_offset = gps_altitude_offset; }
-    TYPE gpsAltitudeOffset() const { return _gps_altitude_offset; }
-
-    void gpsWgs84Home(const std::array<TYPE, 2>& gps_wgs84_home){ _gps_wgs84_home = gps_wgs84_home; }
-    std::array<TYPE, 2> gpsWgs84Home() const { return _gps_wgs84_home; }
-
     TYPE _dt;
 
   private: 
@@ -380,16 +287,5 @@ class UKFQuad
     Eigen::Quaternion<TYPE>   _Rgyro_quat; //!< Rotation matrix from body to world frame
     Eigen::Quaternion<TYPE>   _quat_current; //!< Current quaternion
 
-    std::array<TYPE, 2> _gps_wgs84_home; //!< Home point in WGS84 coordinates
-
-    uint8_t _measurement_source = 0; //!< Measurement source
-
-    TYPE _gps_altitude_offset; //!< GPS altitude offset, used to align the GPS altitude with rangefinder altitude
-
-    TYPE _baro_initial_pressure; //!< Initial pressure used in the barometric formula
-    TYPE _baro_initial_altitude; //!< Initial altitude used in the barometric formula
-    TYPE _baro_temperature;      //!< Temperature not used at the moment, approximated value
-
-    TYPE _range_initial_altitude; //!< Initial altitude used in the range finder formula
 };
 

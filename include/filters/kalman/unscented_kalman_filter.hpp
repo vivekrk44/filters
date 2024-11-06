@@ -7,8 +7,8 @@
 #pragma once
 
 // Eigen includes
-#include<eigen3/Eigen/Dense>
-#include<eigen3/Eigen/Cholesky>
+#include <eigen3/Eigen/Dense>
+#include <eigen3/Eigen/Cholesky>
 
 // STD imports
 #include <iomanip>
